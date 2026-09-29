@@ -132,7 +132,57 @@ function periodBar() {
 function metric(label, value, iconName, note = '', type = '') { return `<article class="metric-card ${type}"><div class="metric-top"><span class="metric-label">${label}</span><span class="metric-icon">${icon(iconName)}</span></div><div class="metric-value">${value}</div><span class="metric-note">${note}</span></article>`; }
 function empty(title, description, action = '') { return `<div class="empty-state">${icon('empty')}<h3>${title}</h3><p>${description}</p>${action}</div>`; }
 function table(headers, rows, emptyMessage = 'لا توجد بيانات لهذه الفترة.', tableClass = '') { return rows.length ? `<div class="table-wrap"><table class="table ${tableClass}"><thead><tr>${headers.map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` : empty('مساحة تنتظر أول خطوة', emptyMessage); }
-function actions(entity, row) { return `<div class="row-actions"><button class="icon-btn" data-action="edit" data-entity="${entity}" data-id="${esc(row.id)}" aria-label="تعديل ${entityNames[entity]}" title="تعديل">${icon('edit')}</button><button class="icon-btn delete-action" data-action="delete" data-entity="${entity}" data-id="${esc(row.id)}" aria-label="حذف ${entityNames[entity]}" title="حذف">${icon('trash')}</button></div>`; }
+function actions(entity, row) { return `<div class="row-actions">${entity === 'sales' ? `<button class="icon-btn" data-action="invoice" data-id="${esc(row.id)}" aria-label="طباعة فاتورة" title="طباعة فاتورة">${icon('print')}</button>` : ''}<button class="icon-btn" data-action="edit" data-entity="${entity}" data-id="${esc(row.id)}" aria-label="تعديل ${entityNames[entity]}" title="تعديل">${icon('edit')}</button><button class="icon-btn delete-action" data-action="delete" data-entity="${entity}" data-id="${esc(row.id)}" aria-label="حذف ${entityNames[entity]}" title="حذف">${icon('trash')}</button></div>`; }
+
+// One invoice per saved sale. The full immutable sale ID keeps the reference
+// stable across edits, payment changes and backup restores without a DB migration.
+function invoiceMarkup(id) {
+  const sale = byId('sales', id);
+  if (!sale) throw new Error('عملية البيع غير موجودة أو تم حذفها.');
+  const total = totalSale(sale), paid = paidSale(id), due = dueSale(sale);
+  return `<article class="customer-invoice" dir="rtl" lang="ar">
+    <header class="invoice-header">${logo()}<div><h1>إرث الطيب</h1><p>فاتورة بيع</p></div></header>
+    <dl class="invoice-details"><div><dt>رقم الفاتورة</dt><dd class="invoice-reference" dir="ltr">INV-${esc(sale.id)}</dd></div><div><dt>تاريخ البيع</dt><dd>${esc(dateLabel(sale.date))}</dd></div><div><dt>العميل</dt><dd>${esc(sale.customer || 'عميل نقدي')}</dd></div><div><dt>حالة الدفع</dt><dd>${statusTag(due, total)}</dd></div></dl>
+    <table class="invoice-table"><thead><tr><th>المنتج</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody><tr><td>${esc(productName(sale.productId))}</td><td>${number(sale.quantity)}</td><td>${money(sale.unitPrice)}</td><td>${money(total)}</td></tr></tbody></table>
+    <dl class="invoice-totals"><div><dt>الإجمالي</dt><dd>${money(total)}</dd></div><div><dt>المدفوع</dt><dd>${money(paid)}</dd></div><div class="invoice-balance"><dt>المتبقي</dt><dd>${money(due)}</dd></div></dl>
+    <footer class="invoice-footer"><p>شكرًا لاختياركم إرث الطيب</p><small>حالة السداد حسب البيانات المحفوظة وقت إصدار هذه النسخة.</small></footer>
+  </article>`;
+}
+async function openInvoice(id, button) {
+  button.disabled = true;
+  try {
+    applyState(await api('/state'));
+    showModal('فاتورة العميل', invoiceMarkup(id), `<button type="button" class="button secondary" data-action="close-modal">إغلاق</button><button type="button" class="button primary" data-action="print-invoice" data-id="${esc(id)}">${icon('print')}طباعة / حفظ PDF</button>`);
+    $('#active-modal').classList.add('invoice-modal');
+  } catch (error) { toast(error.message, 'error'); }
+  finally { button.disabled = false; }
+}
+let invoicePrintTitle = null;
+function clearInvoicePrint() {
+  document.body.classList.remove('printing-invoice');
+  document.getElementById('invoice-print-root')?.remove();
+  if (invoicePrintTitle !== null) { document.title = invoicePrintTitle; invoicePrintTitle = null; }
+}
+async function printInvoice(id, button) {
+  button.disabled = true;
+  try {
+    // A fresh read avoids printing a payment balance changed on another device.
+    applyState(await api('/state'));
+    const html = invoiceMarkup(id);
+    clearInvoicePrint();
+    const root = document.createElement('section'); root.id = 'invoice-print-root'; root.innerHTML = html;
+    document.body.append(root);
+    await Promise.all(Array.from(root.querySelectorAll('img'), img => img.decode()));
+    if (document.fonts?.ready) await document.fonts.ready;
+    invoicePrintTitle = document.title; document.title = `Erth-Alteeb-INV-${id}`;
+    document.body.classList.add('printing-invoice');
+    closeModal();
+    window.print();
+  } catch (error) { clearInvoicePrint(); toast(error.message, 'error'); }
+  finally { button.disabled = false; }
+}
+window.addEventListener('afterprint', clearInvoicePrint);
+
 function statusTag(due, total) { return due <= .001 ? '<span class="tag success">مدفوع</span>' : `<span class="tag ${due < total - .001 ? 'warning' : 'danger'}">${due < total - .001 ? 'مدفوع جزئيًا' : 'غير مدفوع'}</span>`; }
 function matches(...values) { return !search || values.some(value => String(value || '').toLocaleLowerCase().includes(search.toLocaleLowerCase())); }
 function searchBar(placeholder, meta = '') { return `<div class="toolbar"><label class="search-wrap">${icon('search')}<input id="table-search" class="search-input" type="search" value="${esc(search)}" placeholder="${placeholder}" aria-label="${placeholder}"></label><span class="table-count">${meta}</span></div>`; }
@@ -341,7 +391,9 @@ document.addEventListener('click', async event => {
     case 'period': period = target.dataset.period; renderPage(); break;
     case 'refresh': target.disabled = true; await refresh(); if (target.isConnected) target.disabled = false; break;
     case 'alerts': showModal('تنبيهات أعمالك', alertsContent(data()), '<button type="button" class="button primary" data-action="close-modal">تم</button>'); break;
-    case 'print': window.print(); break;
+    case 'invoice': await openInvoice(id, target); break;
+    case 'print-invoice': await printInvoice(id, target); break;
+    case 'print': clearInvoicePrint(); window.print(); break;
     case 'csv': csvExport(); break;
     case 'backup': await downloadBackup(target); break;
     case 'restore': openRestore(); break;
