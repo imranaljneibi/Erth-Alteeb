@@ -44,7 +44,7 @@ async function loadApp(fetchImpl, cryptoImpl = webcrypto) {
     setTimeout() { return 1; }, clearTimeout() {},
   });
   vm.runInContext(`${source}\n;globalThis.__testApp = {
-    refresh, startSync, stopSync, applyState, submitModal, requestKey,
+    refresh, startSync, stopSync, applyState, submitModal, requestKey, invoiceMarkup,
     state: () => state,
     pendingRefresh: () => refreshPromise,
     seed(value) { state = value; user = { name: 'Test owner' }; },
@@ -143,4 +143,32 @@ test('LAN browsers without crypto.randomUUID generate server-compatible idempote
   assert.match(first, uuidV4);
   assert.match(second, uuidV4);
   assert.notEqual(first, second);
+});
+
+
+test('customer invoices reflect current payments and edits without disclosing costs or internal notes', async () => {
+  const { app } = await loadApp(() => assert.fail('rendering the supplied snapshot makes no mutations'));
+  const value = snapshot(1, [{ id: 'p1', name: '<img src=x onerror=alert(1)>', cost: 9876.54 }]);
+  value.sales = [{ id: 'sale-stable-123', productId: 'p1', customer: '<script>alert(1)</script>', date: '2026-09-29', quantity: 3, unitPrice: 10.15, unitCost: 9876.54, notes: 'PRIVATE INTERNAL NOTE' }];
+  value.payments = [{ saleId: 'sale-stable-123', amount: 10.10 }, { saleId: 'other-sale', amount: 900 }];
+  app.seed(value);
+  let html = app.invoiceMarkup('sale-stable-123');
+  assert.match(html, /INV-sale-stable-123/);
+  assert.match(html, /30\.45/);
+  assert.match(html, /10\.1</);
+  assert.match(html, /20\.35/);
+  assert.match(html, /مدفوع جزئيًا/);
+  assert.match(html, /&lt;script&gt;/);
+  assert.match(html, /&lt;img/);
+  assert.doesNotMatch(html, /<script>|<img src=x|9876|PRIVATE INTERNAL NOTE|صافي الربح|تكلفة/);
+  value.payments.push({ saleId: 'sale-stable-123', amount: 20.35 });
+  assert.match(app.invoiceMarkup('sale-stable-123'), /class="tag success">مدفوع/);
+  value.payments = [];
+  value.sales[0].quantity = 2;
+  html = app.invoiceMarkup('sale-stable-123');
+  assert.match(html, /20\.3</);
+  assert.match(html, /غير مدفوع/);
+  assert.match(html, /INV-sale-stable-123/, 'invoice reference survives sale edits');
+  value.sales = [];
+  assert.throws(() => app.invoiceMarkup('sale-stable-123'), /تم حذفها/);
 });
