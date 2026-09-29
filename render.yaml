@@ -1,0 +1,30 @@
+# Paid persistent service: review Render's displayed cost before creating it.
+# Upload this file at the repository root with package.json and server.mjs.
+services:
+  - type: web
+    name: irth-al-tayeb
+    runtime: node
+    plan: 0.5c-512mb
+    region: frankfurt
+    numInstances: 1
+    buildCommand: npm run check && npm test
+    startCommand: npm start
+    healthCheckPath: /api/status
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_VERSION
+        value: "24.21.0"
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: DB_PATH
+        value: /var/data/irth.sqlite
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: SETUP_TOKEN
+        generateValue: true
+    disk:
+      name: irth-data
+      mountPath: /var/data
+      sizeGB: 1

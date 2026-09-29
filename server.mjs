@@ -107,7 +107,7 @@ export function createApp(options = {}) {
   const host = options.host ?? process.env.HOST ?? '0.0.0.0';
   const secureCookie = options.cookieSecure ?? process.env.COOKIE_SECURE === 'true';
   const setupToken = options.setupToken ?? process.env.SETUP_TOKEN ?? '';
-  const publicOrigin = options.publicOrigin ?? process.env.PUBLIC_ORIGIN ?? '';
+  const publicOrigin = options.publicOrigin ?? (process.env.PUBLIC_ORIGIN || process.env.RENDER_EXTERNAL_URL || '');
   const logger = options.logger ?? console;
   const store = new Store(dbPath);
   if (dbPath !== ':memory:') {
